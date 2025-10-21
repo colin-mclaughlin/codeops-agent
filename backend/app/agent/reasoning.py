@@ -10,6 +10,9 @@ from backend.app.models.run_log import RunLog
 from backend.app.models.base import Base
 from backend.app.retrieval.context import ContextRetriever
 from backend.app.utils.logging import get_logger
+from backend.app.agent.tools.git_tool import GitTool
+from backend.app.agent.tools.test_runner_tool import TestRunnerTool
+from backend.app.agent.tools.notifier_tool import NotifierTool
 
 
 class AgentRun(Base):
@@ -68,6 +71,24 @@ class AgentOrchestrator:
         await asyncio.sleep(0.1)
         result = {"status": "ok", "details": f"Executed plan: {plan_text[:50]}..."}
         self.logger.info("plan executed successfully")
+        
+        # Parse keywords from plan_text and execute appropriate tools
+        tool_results = {}
+        
+        if "git" in plan_text.lower():
+            git_tool = GitTool()
+            tool_results["git"] = await git_tool.run()
+        
+        if "test" in plan_text.lower():
+            test_tool = TestRunnerTool()
+            tool_results["test_runner"] = await test_tool.run()
+        
+        if "notify" in plan_text.lower():
+            notifier_tool = NotifierTool()
+            tool_results["notifier"] = await notifier_tool.run()
+        
+        # Combine tool results with main result
+        result.update(tool_results)
         return result
     
     async def run_pipeline(self, run_log_id: int) -> Dict[str, Any]:
