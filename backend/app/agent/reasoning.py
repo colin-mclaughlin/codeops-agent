@@ -13,6 +13,7 @@ from backend.app.utils.logging import get_logger
 from backend.app.agent.tools.git_tool import GitTool
 from backend.app.agent.tools.test_runner_tool import TestRunnerTool
 from backend.app.agent.tools.notifier_tool import NotifierTool
+from backend.app.agent.safety import check_permissions, within_token_budget
 
 
 class AgentRun(Base):
@@ -72,20 +73,34 @@ class AgentOrchestrator:
         result = {"status": "ok", "details": f"Executed plan: {plan_text[:50]}..."}
         self.logger.info("plan executed successfully")
         
+        # Check token budget
+        tokens_used = len(plan_text.split()) * 10
+        if not within_token_budget(tokens_used):
+            return {"error": "token limit exceeded"}
+        
         # Parse keywords from plan_text and execute appropriate tools
         tool_results = {}
         
         if "git" in plan_text.lower():
-            git_tool = GitTool()
-            tool_results["git"] = await git_tool.run()
+            if check_permissions("git"):
+                git_tool = GitTool()
+                tool_results["git"] = await git_tool.run()
+            else:
+                self.logger.info("Git tool execution skipped due to safety check")
         
         if "test" in plan_text.lower():
-            test_tool = TestRunnerTool()
-            tool_results["test_runner"] = await test_tool.run()
+            if check_permissions("test_runner"):
+                test_tool = TestRunnerTool()
+                tool_results["test_runner"] = await test_tool.run()
+            else:
+                self.logger.info("Test runner tool execution skipped due to safety check")
         
         if "notify" in plan_text.lower():
-            notifier_tool = NotifierTool()
-            tool_results["notifier"] = await notifier_tool.run()
+            if check_permissions("notifier"):
+                notifier_tool = NotifierTool()
+                tool_results["notifier"] = await notifier_tool.run()
+            else:
+                self.logger.info("Notifier tool execution skipped due to safety check")
         
         # Combine tool results with main result
         result.update(tool_results)
