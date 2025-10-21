@@ -7,3 +7,5 @@ MCP-powered DevOps agent that diagnoses CI failures and proposes fixes.
 ```bash
 uvicorn backend.app.main:app --reload --port 8000
 ```
+
+Note: Copy `.env.example` to `.env` if you need to customize configuration.
