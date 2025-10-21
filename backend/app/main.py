@@ -2,6 +2,9 @@
 from backend.app.routers import system, webhook, metrics
 from backend.app.db import init_db
 from backend.app.utils.logging import setup_logging
+# Import models to ensure they're registered with Base.metadata
+from backend.app.models import run_log
+from backend.app.agent import reasoning
 
 
 def create_app() -> FastAPI:
