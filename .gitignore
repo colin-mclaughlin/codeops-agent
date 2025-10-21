@@ -22,3 +22,10 @@ dist/
 # Editor/Tools
 .vscode/
 .idea/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+codeops.db
+
