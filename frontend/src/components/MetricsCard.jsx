@@ -22,8 +22,8 @@ export default function MetricsCard() {
 
   useEffect(() => {
     fetchMetrics();
-    // Refresh metrics every 60 seconds
-    const interval = setInterval(fetchMetrics, 60000);
+    // Refresh metrics every 10 seconds for live updates
+    const interval = setInterval(fetchMetrics, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -65,25 +65,45 @@ export default function MetricsCard() {
       <div className="space-y-2 text-sm">
         <div className="flex justify-between">
           <span className="text-gray-300">Total Runs:</span>
-          <span className="text-white font-medium">{metrics?.runs || 0}</span>
+          <span className="text-white font-medium">{metrics?.total_runs || 0}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-gray-300">Success Rate:</span>
           <span className="text-white font-medium">
-            {metrics?.success_rate || "0%"}
+            {metrics?.success_rate || 0}%
           </span>
         </div>
         <div className="flex justify-between">
           <span className="text-gray-300">Avg Latency:</span>
           <span className="text-white font-medium">
-            {metrics?.avg_latency_ms || 0} ms
+            {metrics?.avg_latency || 0} ms
           </span>
         </div>
-        {metrics?.total_tokens && (
+        <div className="flex justify-between">
+          <span className="text-gray-300">Avg Tokens:</span>
+          <span className="text-white font-medium">
+            {metrics?.avg_tokens || 0}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-300">Avg Cost:</span>
+          <span className="text-white font-medium">
+            ${metrics?.avg_cost_usd || 0}
+          </span>
+        </div>
+        {metrics?.total_tokens > 0 && (
           <div className="flex justify-between">
             <span className="text-gray-300">Total Tokens:</span>
             <span className="text-white font-medium">
               {metrics.total_tokens.toLocaleString()}
+            </span>
+          </div>
+        )}
+        {metrics?.total_cost_usd > 0 && (
+          <div className="flex justify-between">
+            <span className="text-gray-300">Total Cost:</span>
+            <span className="text-white font-medium">
+              ${metrics.total_cost_usd.toFixed(5)}
             </span>
           </div>
         )}

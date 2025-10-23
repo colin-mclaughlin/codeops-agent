@@ -5,7 +5,8 @@ from typing import Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Integer, String, DateTime, JSON, func
+from sqlalchemy import Integer, String, DateTime, JSON, func, Float
+from typing import Optional
 from backend.app.models.run_log import RunLog
 from backend.app.models.base import Base
 from backend.app.retrieval import get_context
@@ -27,6 +28,8 @@ class AgentRun(Base):
     run_log_id: Mapped[int] = mapped_column(Integer, nullable=False)
     plan: Mapped[str] = mapped_column(String, nullable=False)
     result: Mapped[dict] = mapped_column(JSON, nullable=False)
+    token_count: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -230,11 +233,19 @@ class AgentOrchestrator:
             # Execute
             exec_result = await self.execute_plan(plan_text)
 
+            # Calculate token count and cost
+            # For now, estimate tokens based on plan length (you can replace with actual token counting)
+            estimated_tokens = len(plan_text.split()) * 10  # Rough estimation
+            cost_per_token = 0.000002  # Example cost per token (adjust based on your LLM pricing)
+            estimated_cost = estimated_tokens * cost_per_token
+            
             # Store AgentRun record
             agent_run = AgentRun(
                 run_log_id=run_log_id,
                 plan=plan_text,
-                result=exec_result
+                result=exec_result,
+                token_count=estimated_tokens,
+                cost_usd=estimated_cost
             )
             self.db_session.add(agent_run)
             await self.db_session.commit()

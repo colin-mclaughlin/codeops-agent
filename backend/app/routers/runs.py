@@ -48,9 +48,9 @@ async def get_agent_runs(
                 result_log = await session.execute(stmt_log)
                 run_log = result_log.scalar_one_or_none()
             
-            # Calculate latency and tokens (mock values for now)
+            # Calculate latency and tokens
             latency_ms = 1000 + (run.id * 50)  # Mock latency
-            tokens_used = len(run.plan.split()) * 10  # Mock token count
+            tokens_used = run.token_count or len(run.plan.split()) * 10  # Use actual token count or fallback
             
             # Determine verdict from result
             verdict = "success" if run.result.get("status") == "ok" else "failure"
@@ -63,7 +63,8 @@ async def get_agent_runs(
                 "plan": run.plan,
                 "status": run.result.get("status", "unknown"),
                 "latency_ms": latency_ms,
-                "tokens_used": tokens_used
+                "tokens_used": tokens_used,
+                "cost_usd": run.cost_usd or 0.0
             }
             
             # Add run log event type if available
@@ -112,7 +113,7 @@ async def get_agent_run(
         
         # Calculate metadata
         latency_ms = 1000 + (agent_run.id * 50)
-        tokens_used = len(agent_run.plan.split()) * 10
+        tokens_used = agent_run.token_count or len(agent_run.plan.split()) * 10
         verdict = "success" if agent_run.result.get("status") == "ok" else "failure"
         
         run_data = {
@@ -124,6 +125,7 @@ async def get_agent_run(
             "status": agent_run.result.get("status", "unknown"),
             "latency_ms": latency_ms,
             "tokens_used": tokens_used,
+            "cost_usd": agent_run.cost_usd or 0.0,
             "result": agent_run.result
         }
         

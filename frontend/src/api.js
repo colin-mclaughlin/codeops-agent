@@ -36,7 +36,7 @@ api.interceptors.response.use(
 );
 
 // API functions
-export const getHealth = () => api.get("/health");
+export const getHealth = () => api.get("/healthz");
 export const getMetrics = () => api.get("/metrics");
 export const getRuns = () => api.get("/agent/runs");
 export const getContext = (sha) => api.get(`/context?commit_sha=${sha}`);
