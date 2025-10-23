@@ -13,6 +13,7 @@ from backend.app.utils.logging import get_logger
 from backend.app.agent.tools.git_tool import GitTool
 from backend.app.agent.tools.test_runner_tool import TestRunnerTool
 from backend.app.agent.tools.notifier_tool import NotifierTool
+from backend.app.agent.github_tool import GitHubTool
 from backend.app.agent.safety import check_permissions, within_token_budget
 
 
@@ -139,6 +140,27 @@ class AgentOrchestrator:
         
         # Record the run in metrics
         record_run(verdict)
+    
+    async def github_actions(self, repo_name: str = "octocat/Hello-World"):
+        """
+        Fetch GitHub repository context including recent commits and workflow runs.
+        
+        Args:
+            repo_name: GitHub repository in format "username/repo-name"
+            
+        Returns:
+            Dictionary containing commits and workflow runs data
+        """
+        try:
+            gh = GitHubTool(repo_name)
+            commits = gh.list_recent_commits()
+            workflows = gh.get_workflow_runs()
+            
+            self.logger.info(f"GitHub context retrieved for {repo_name}: {len(commits)} commits, {len(workflows)} workflow runs")
+            return {"commits": commits, "workflows": workflows, "repo": repo_name}
+        except Exception as e:
+            self.logger.error(f"Error fetching GitHub context: {e}")
+            return {"error": str(e), "repo": repo_name}
     
     async def run_pipeline(self, run_log_id: int) -> Dict[str, Any]:
         """

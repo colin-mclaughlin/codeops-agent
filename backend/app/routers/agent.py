@@ -26,3 +26,22 @@ async def run_agent(run_log_id: int, session: AsyncSession = Depends(get_session
     result = await agent.run_pipeline(run_log_id)
     logger.info(f"Agent run completed for RunLog {run_log_id}")
     return result
+
+
+@router.get("/github-context")
+async def get_github_context(repo: str = "octocat/Hello-World", session: AsyncSession = Depends(get_session)) -> dict:
+    """
+    Test GitHub integration by fetching repository context.
+    
+    Args:
+        repo: GitHub repository in format "username/repo-name"
+        session: Database session
+        
+    Returns:
+        Dictionary containing GitHub context data
+    """
+    agent = AgentOrchestrator(session)
+    logger.info(f"Fetching GitHub context for repository: {repo}")
+    result = await agent.github_actions(repo)
+    logger.info(f"GitHub context retrieved for repository: {repo}")
+    return result
