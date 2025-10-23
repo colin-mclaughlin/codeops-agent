@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import Integer, String, DateTime, JSON, func
 from backend.app.models.run_log import RunLog
 from backend.app.models.base import Base
-from backend.app.retrieval.context import ContextRetriever
+from backend.app.retrieval import get_context
 from backend.app.utils.logging import get_logger
 from backend.app.agent.tools.git_tool import GitTool
 from backend.app.agent.tools.test_runner_tool import TestRunnerTool
@@ -159,11 +159,12 @@ class AgentOrchestrator:
                 self.logger.error(f"RunLog {run_log_id} not found")
                 return {"error": "RunLog not found"}
 
-            # Retrieve context
-            retriever = ContextRetriever(self.db_session)
-            await retriever.build_context_index()
-            context = await retriever.query_context("build failure diagnostics")
+            # Retrieve context using FAISS retrieval system
+            # For now, use a mock commit SHA - in real implementation this would come from run_log
+            commit_sha = f"mock_commit_{run_log_id}"
+            context = await get_context(commit_sha, top_k=5)
             context_text = json.dumps(context)
+            self.logger.info(f"retrieval context: {len(context)} snippets retrieved for commit {commit_sha}")
 
             # Plan
             plan_text = await self.plan_fix(context_text)

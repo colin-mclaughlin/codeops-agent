@@ -29,3 +29,7 @@ dist/
 *.sqlite3
 codeops.db
 
+# FAISS artifacts
+*.bin
+*.pkl
+
