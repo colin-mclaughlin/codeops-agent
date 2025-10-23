@@ -14,6 +14,8 @@ from backend.app.agent.tools.git_tool import GitTool
 from backend.app.agent.tools.test_runner_tool import TestRunnerTool
 from backend.app.agent.tools.notifier_tool import NotifierTool
 from backend.app.agent.github_tool import GitHubTool
+from backend.app.agent.slack_tool import SlackTool
+from backend.app.agent.reasoning_langgraph import LangGraphOrchestrator
 from backend.app.agent.safety import check_permissions, within_token_budget
 
 
@@ -124,7 +126,7 @@ class AgentOrchestrator:
     
     async def report_outcome(self, verdict: str, run_log_id: int) -> None:
         """
-        Stub reporter that logs the outcome and notifies external systems.
+        Reporter that logs the outcome and notifies external systems including Slack.
         
         Args:
             verdict: Evaluation verdict
@@ -133,6 +135,7 @@ class AgentOrchestrator:
         from backend.app.agent.tools.notifier_tool import NotifierTool
         from backend.app.routers.metrics import record_run
         
+        # Existing notifier tool
         notifier = NotifierTool()
         message = f"Agent run {run_log_id} completed with verdict: {verdict}"
         await notifier.run(message=message)
@@ -140,6 +143,18 @@ class AgentOrchestrator:
         
         # Record the run in metrics
         record_run(verdict)
+        
+        # Slack integration
+        try:
+            repo_name = "octocat/Hello-World"  # Default demo repo - can be made configurable
+            slack = SlackTool()
+            slack_result = slack.post_summary(verdict, repo_name, run_log_id=run_log_id)
+            if slack_result.get("ok"):
+                self.logger.info(f"Slack notification sent for run {run_log_id}")
+            else:
+                self.logger.error(f"Slack notification failed: {slack_result.get('error')}")
+        except Exception as e:
+            self.logger.error(f"Slack notification failed: {e}")
     
     async def github_actions(self, repo_name: str = "octocat/Hello-World"):
         """
@@ -161,6 +176,27 @@ class AgentOrchestrator:
         except Exception as e:
             self.logger.error(f"Error fetching GitHub context: {e}")
             return {"error": str(e), "repo": repo_name}
+    
+    async def run_langgraph(self, commit_sha: str = "latest", repo_name: str = "octocat/Hello-World"):
+        """
+        Run LangGraph-style reasoning pipeline for advanced decision-making.
+        
+        Args:
+            commit_sha: Commit SHA for context retrieval (default: "latest")
+            repo_name: GitHub repository name for context and operations
+            
+        Returns:
+            Dictionary with LangGraph pipeline results
+        """
+        try:
+            self.logger.info(f"Starting LangGraph reasoning for commit {commit_sha} in repo {repo_name}")
+            graph = LangGraphOrchestrator(repo_name)
+            result = await graph.run_pipeline(commit_sha)
+            self.logger.info(f"LangGraph reasoning completed: {result.get('verdict', 'unknown')}")
+            return result
+        except Exception as e:
+            self.logger.error(f"LangGraph reasoning failed: {e}")
+            return {"error": str(e), "commit_sha": commit_sha, "repo": repo_name}
     
     async def run_pipeline(self, run_log_id: int) -> Dict[str, Any]:
         """

@@ -45,3 +45,23 @@ async def get_github_context(repo: str = "octocat/Hello-World", session: AsyncSe
     result = await agent.github_actions(repo)
     logger.info(f"GitHub context retrieved for repository: {repo}")
     return result
+
+
+@router.get("/langgraph")
+async def run_langgraph(commit_sha: str = "latest", repo: str = "octocat/Hello-World", session: AsyncSession = Depends(get_session)) -> dict:
+    """
+    Run LangGraph-style reasoning pipeline for advanced decision-making.
+    
+    Args:
+        commit_sha: Commit SHA for context retrieval (default: "latest")
+        repo: GitHub repository in format "username/repo-name"
+        session: Database session
+        
+    Returns:
+        Dictionary containing LangGraph pipeline results
+    """
+    agent = AgentOrchestrator(session)
+    logger.info(f"Running LangGraph reasoning for commit {commit_sha} in repository: {repo}")
+    result = await agent.run_langgraph(commit_sha, repo)
+    logger.info(f"LangGraph reasoning completed for repository: {repo}")
+    return result
