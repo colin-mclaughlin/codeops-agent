@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Dict, Any, List
 from backend.app.agent.github_tool import GitHubTool
 from backend.app.agent.slack_tool import SlackTool
+from backend.app.agent.critic_agent import CriticAgent
 from backend.app.retrieval import get_context
 from backend.app.utils.logging import get_logger
 from backend.app.config import settings
@@ -246,13 +247,32 @@ class LangGraphOrchestrator:
             logger.info("Step 7: Executing plan")
             execution_result = await self.execute_plan(plan_result["plan"])
             
-            # Step 8: Final summary
+            # Step 8: Critic review
+            logger.info("Step 8: Critic review")
+            critic = CriticAgent()
+            critique_result = await critic.critique(
+                plan_result["plan"], 
+                reflection_result["reflection"],
+                analysis_result["context_preview"]
+            )
+            
+            # Record critic metrics
+            from backend.app.routers.metrics import record_critic
+            record_critic(critique_result.get("confidence", 0))
+            
+            # Step 9: Send critic review to Slack
+            logger.info("Step 9: Sending critic review to Slack")
+            critic_summary = critic.get_critique_summary(critique_result)
+            self.slack.post_message(critic_summary, emoji=":mag_right:")
+            
+            # Step 10: Final summary
             end_time = datetime.utcnow()
             total_latency = (end_time - start_time).total_seconds()
             
             verdict = "success" if execution_result["status"] == "simulated_success" else "failure"
             
             logger.info(f"LangGraph reasoning completed in {total_latency:.2f}s with verdict: {verdict}")
+            logger.info(f"Critic confidence: {critique_result.get('confidence', 0)}")
             
             # Send final summary to Slack
             self.slack.post_summary(verdict, self.repo_name, run_log_id=hash(commit_sha) % 10000)
@@ -265,6 +285,7 @@ class LangGraphOrchestrator:
                 "action_plan": plan_result,
                 "reflection": reflection_result,
                 "execution": execution_result,
+                "critique": critique_result,
                 "timestamp": end_time.isoformat()
             }
             

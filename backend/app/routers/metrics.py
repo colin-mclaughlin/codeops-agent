@@ -7,6 +7,8 @@ logger = get_logger(__name__)
 # Global counters for metrics
 TOTAL_RUNS = 0
 SUCCESS_RUNS = 0
+CRITIC_RUNS = 0
+AVG_CONFIDENCE = 0.0
 
 
 def record_run(verdict: str) -> None:
@@ -22,6 +24,19 @@ def record_run(verdict: str) -> None:
         SUCCESS_RUNS += 1
 
 
+def record_critic(confidence: int) -> None:
+    """
+    Record a critic run with confidence score.
+    
+    Args:
+        confidence: Confidence score (0-100)
+    """
+    global CRITIC_RUNS, AVG_CONFIDENCE
+    CRITIC_RUNS += 1
+    AVG_CONFIDENCE = round(((AVG_CONFIDENCE * (CRITIC_RUNS - 1)) + confidence) / CRITIC_RUNS, 2)
+    logger.info(f"Critic run recorded: confidence={confidence}, avg={AVG_CONFIDENCE}")
+
+
 @router.get("/")
 def get_metrics() -> dict:
     """
@@ -35,5 +50,7 @@ def get_metrics() -> dict:
     return {
         "runs": TOTAL_RUNS,
         "success_rate": round(SUCCESS_RUNS / TOTAL_RUNS, 2) if TOTAL_RUNS else 0,
-        "avg_latency_ms": 1300
+        "avg_latency_ms": 1300,
+        "critic_runs": CRITIC_RUNS,
+        "avg_confidence": AVG_CONFIDENCE
     }

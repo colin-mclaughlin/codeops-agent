@@ -1,6 +1,6 @@
 ﻿from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.app.routers import system, webhook, metrics, agent, runs, context, github, slack
+from backend.app.routers import system, webhook, metrics, agent, runs, context, github, slack, critic
 from backend.app.db import init_db
 from backend.app.utils.logging import setup_logging
 # Import models to ensure they're registered with Base.metadata
@@ -31,6 +31,7 @@ def create_app() -> FastAPI:
     app.include_router(context.router)
     app.include_router(github.router)
     app.include_router(slack.router)
+    app.include_router(critic.router)
     
     @app.on_event("startup")
     async def startup_event():
