@@ -30,6 +30,7 @@ class AgentRun(Base):
     result: Mapped[dict] = mapped_column(JSON, nullable=False)
     token_count: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     cost_usd: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
+    critic_confidence: Mapped[Optional[float]] = mapped_column(Float, default=None)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -65,12 +66,14 @@ class AgentOrchestrator:
         self.logger.info(f"plan generated: {plan}")
         return plan
     
-    async def execute_plan(self, plan_text: str) -> Dict[str, Any]:
+    async def execute_plan(self, plan_text: str, repo_path: str = None, repo_name: str = "octocat/Hello-World") -> Dict[str, Any]:
         """
-        Stub executor: simulate running the plan.
+        Enhanced executor: run the plan with real GitHub and test operations.
         
         Args:
             plan_text: Plan to execute
+            repo_path: Local repository path for test execution
+            repo_name: GitHub repository name for operations
             
         Returns:
             Dictionary containing execution results
@@ -87,20 +90,70 @@ class AgentOrchestrator:
         # Parse keywords from plan_text and execute appropriate tools
         tool_results = {}
         
-        if "git" in plan_text.lower():
+        # GitHub operations
+        if "git" in plan_text.lower() or "branch" in plan_text.lower() or "commit" in plan_text.lower():
             if check_permissions("git"):
-                git_tool = GitTool()
-                tool_results["git"] = await git_tool.run()
+                try:
+                    github_tool = GitHubTool(repo_name)
+                    
+                    # Create a new branch for the fix
+                    branch_name = github_tool.create_branch_with_uuid()
+                    tool_results["github_branch"] = {"branch": branch_name}
+                    self.logger.info(f"Created branch: {branch_name}")
+                    
+                    # If we have file changes to commit (this would come from the plan analysis)
+                    # For now, we'll simulate this - in real implementation, this would parse the plan
+                    if "fix" in plan_text.lower() or "update" in plan_text.lower():
+                        # Simulate file changes - in real implementation, this would be extracted from the plan
+                        file_changes = [
+                            {
+                                "path": "test_fix.py",
+                                "content": "# Simulated fix\nprint('Fixed!')"
+                            }
+                        ]
+                        
+                        commit_sha = github_tool.commit_and_push_changes(
+                            branch_name, 
+                            file_changes, 
+                            f"Agent fix: {plan_text[:100]}"
+                        )
+                        tool_results["github_commit"] = {"commit_sha": commit_sha, "branch": branch_name}
+                        self.logger.info(f"Committed changes to branch {branch_name}: {commit_sha}")
+                        
+                except Exception as e:
+                    self.logger.error(f"GitHub operations failed: {e}")
+                    tool_results["github_error"] = str(e)
             else:
-                self.logger.info("Git tool execution skipped due to safety check")
+                self.logger.info("GitHub tool execution skipped due to safety check")
         
+        # Test execution
         if "test" in plan_text.lower():
             if check_permissions("test_runner"):
-                test_tool = TestRunnerTool()
-                tool_results["test_runner"] = await test_tool.run()
+                try:
+                    test_tool = TestRunnerTool()
+                    
+                    # Use provided repo_path or default to current directory
+                    test_repo_path = repo_path or "."
+                    
+                    # Run tests
+                    test_result = await test_tool.run_tests_async(test_repo_path)
+                    tool_results["test_runner"] = test_result
+                    
+                    # Log test results
+                    if test_result["status"] == "success":
+                        self.logger.info("Tests passed successfully")
+                    elif test_result["status"] == "fail":
+                        self.logger.warning("Tests failed")
+                    else:
+                        self.logger.error(f"Test execution error: {test_result.get('error', 'unknown')}")
+                        
+                except Exception as e:
+                    self.logger.error(f"Test execution failed: {e}")
+                    tool_results["test_error"] = str(e)
             else:
                 self.logger.info("Test runner tool execution skipped due to safety check")
         
+        # Legacy tool support
         if "notify" in plan_text.lower():
             if check_permissions("notifier"):
                 notifier_tool = NotifierTool()
@@ -230,8 +283,8 @@ class AgentOrchestrator:
             # Plan
             plan_text = await self.plan_fix(context_text)
 
-            # Execute
-            exec_result = await self.execute_plan(plan_text)
+            # Execute with repository context
+            exec_result = await self.execute_plan(plan_text, repo_path=".", repo_name="octocat/Hello-World")
 
             # Calculate token count and cost
             # For now, estimate tokens based on plan length (you can replace with actual token counting)
@@ -250,6 +303,11 @@ class AgentOrchestrator:
             self.db_session.add(agent_run)
             await self.db_session.commit()
 
+            # Run critic evaluation on the results
+            critic_confidence = await self.run_critic_evaluation(plan_text, exec_result)
+            agent_run.critic_confidence = critic_confidence
+            await self.db_session.commit()
+
             # Evaluate result and report outcome
             verdict = await self.evaluate_result(exec_result)
             await self.report_outcome(verdict, run_log_id)
@@ -260,3 +318,58 @@ class AgentOrchestrator:
         except Exception as e:
             self.logger.error(f"Pipeline error: {e}")
             return {"error": str(e)}
+    
+    async def run_critic_evaluation(self, plan_text: str, exec_result: dict) -> float:
+        """
+        Run critic evaluation on the plan and execution results.
+        
+        Args:
+            plan_text: The executed plan
+            exec_result: The execution results
+            
+        Returns:
+            Confidence score from 0-100
+        """
+        try:
+            from backend.app.agent.critic_agent import CriticAgent
+            
+            # Create context from execution results
+            context_parts = []
+            
+            # Add test results if available
+            if "test_runner" in exec_result:
+                test_result = exec_result["test_runner"]
+                context_parts.append(f"Test Results: {test_result['status']}")
+                if test_result.get("output"):
+                    context_parts.append(f"Test Output: {test_result['output'][:500]}...")
+            
+            # Add GitHub operations if available
+            if "github_branch" in exec_result:
+                branch_info = exec_result["github_branch"]
+                context_parts.append(f"Created Branch: {branch_info['branch']}")
+            
+            if "github_commit" in exec_result:
+                commit_info = exec_result["github_commit"]
+                context_parts.append(f"Commit SHA: {commit_info['commit_sha']}")
+            
+            # Add any errors
+            if "github_error" in exec_result:
+                context_parts.append(f"GitHub Error: {exec_result['github_error']}")
+            
+            if "test_error" in exec_result:
+                context_parts.append(f"Test Error: {exec_result['test_error']}")
+            
+            context = "\n".join(context_parts) if context_parts else "No additional context available"
+            
+            # Run critic evaluation
+            critic = CriticAgent()
+            critique_result = await critic.quick_review(plan_text)
+            
+            confidence = critique_result.get("confidence", 70)
+            self.logger.info(f"Critic evaluation completed with confidence: {confidence}")
+            
+            return float(confidence)
+            
+        except Exception as e:
+            self.logger.error(f"Critic evaluation failed: {e}")
+            return 50.0  # Default confidence on error

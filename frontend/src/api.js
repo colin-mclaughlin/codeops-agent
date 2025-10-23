@@ -38,7 +38,8 @@ api.interceptors.response.use(
 // API functions
 export const getHealth = () => api.get("/healthz");
 export const getMetrics = () => api.get("/metrics");
-export const getRuns = () => api.get("/agent/runs");
+export const getRuns = (limit = 50) => api.get(`/agent/runs?limit=${limit}`);
+export const getRunTrace = (runId) => api.get(`/agent/runs/${runId}/trace`);
 export const getContext = (sha) => api.get(`/context?commit_sha=${sha}`);
 
 // Additional API functions for context management

@@ -1,9 +1,35 @@
+import { useEffect, useState } from "react";
 import HealthCard from "./components/HealthCard";
 import MetricsCard from "./components/MetricsCard";
 import RunsTable from "./components/RunsTable";
 import ContextPanel from "./components/ContextPanel";
+import LatencyLineChart from "./components/charts/LatencyLineChart";
+import SuccessRatioChart from "./components/charts/SuccessRatioChart";
+import ConfidenceTrendChart from "./components/charts/ConfidenceTrendChart";
+import { getRuns } from "./api";
 
 export default function App() {
+  const [runs, setRuns] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchRuns = async () => {
+    try {
+      const response = await getRuns(50);
+      setRuns(response.data);
+    } catch (err) {
+      console.error("Error fetching runs:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRuns();
+    // Refresh runs every 15 seconds for charts
+    const interval = setInterval(fetchRuns, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       {/* Header */}
@@ -35,6 +61,13 @@ export default function App() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <HealthCard />
             <MetricsCard />
+          </div>
+
+          {/* Charts Row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            <LatencyLineChart runs={runs} />
+            <SuccessRatioChart runs={runs} />
+            <ConfidenceTrendChart runs={runs} />
           </div>
 
           {/* Runs Table */}

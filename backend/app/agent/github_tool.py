@@ -1,7 +1,14 @@
 import os
+import uuid
 from github import Github
 from backend.app.utils.logging import get_logger
 from backend.app.config import settings
+from backend.app.agent.safety import (
+    validate_branch_name, 
+    log_operation, 
+    check_github_token,
+    is_dry_run_mode
+)
 
 
 class GitHubTool:
@@ -19,14 +26,20 @@ class GitHubTool:
         self.logger = get_logger(__name__)
         self.repo_name = repo_name
         
-        # Get GitHub token from settings
-        github_token = settings.GITHUB_TOKEN
-        if not github_token:
-            raise ValueError("GITHUB_TOKEN environment variable is required")
+        # Get GitHub token from settings with safety check
+        if not check_github_token():
+            raise ValueError("GITHUB_TOKEN environment variable is required and valid")
         
+        github_token = settings.GITHUB_TOKEN
         self.client = Github(github_token)
         self.repo = self.client.get_repo(repo_name)
         self.logger.info(f"GitHubTool initialized for repository: {repo_name}")
+        
+        # Log initialization
+        log_operation("GitHubTool_Init", {
+            "repo_name": repo_name,
+            "dry_run_mode": is_dry_run_mode()
+        })
 
     def list_recent_commits(self, limit: int = 5):
         """
@@ -95,6 +108,26 @@ class GitHubTool:
             Dictionary with branch creation details
         """
         try:
+            # Safety checks
+            if not validate_branch_name(new_branch):
+                # Auto-fix branch name if it doesn't have agent prefix
+                if not new_branch.startswith('agent-fix/'):
+                    new_branch = f"agent-fix/{new_branch}"
+                    if not validate_branch_name(new_branch):
+                        raise ValueError(f"Invalid branch name: {new_branch}")
+            
+            # Check dry run mode
+            if is_dry_run_mode():
+                self.logger.info(f"DRY RUN: Would create branch '{new_branch}' from '{base}'")
+                return {"branch": new_branch, "base": base, "sha": "dry_run_sha", "dry_run": True}
+            
+            # Log the operation
+            log_operation("Create_Branch", {
+                "branch": new_branch,
+                "base": base,
+                "repo": self.repo_name
+            })
+            
             ref = self.repo.get_git_ref(f"heads/{base}")
             self.repo.create_git_ref(ref=f"refs/heads/{new_branch}", sha=ref.object.sha)
             self.logger.info(f"Created branch '{new_branch}' from '{base}'")
@@ -103,50 +136,98 @@ class GitHubTool:
             self.logger.error(f"Error creating branch: {e}")
             raise
 
-    def commit_and_push(self, branch: str, file_path: str, content: str, message: str):
+    def commit_and_push(self, branch: str, file_changes: list[dict], message: str):
         """
-        Update a file and commit the changes.
+        Update multiple files and commit the changes.
         
         Args:
             branch: Branch name to commit to
-            file_path: Path to the file to update
-            content: New content for the file
+            file_changes: List of dictionaries with 'path' and 'content' keys
             message: Commit message
             
         Returns:
             Dictionary with commit details
         """
         try:
-            # Try to get existing file content
-            try:
-                contents = self.repo.get_contents(file_path, ref=branch)
-                # Update existing file
-                result = self.repo.update_file(
-                    contents.path, 
-                    message, 
-                    content, 
-                    contents.sha, 
-                    branch=branch
-                )
-                self.logger.info(f"Updated file '{file_path}' on branch '{branch}'")
-            except Exception:
-                # File doesn't exist, create new file
-                result = self.repo.create_file(
-                    file_path,
-                    message,
-                    content,
-                    branch=branch
-                )
-                self.logger.info(f"Created file '{file_path}' on branch '{branch}'")
+            # Safety checks
+            if not validate_branch_name(branch):
+                raise ValueError(f"Invalid branch name: {branch}")
+            
+            # Check dry run mode
+            if is_dry_run_mode():
+                self.logger.info(f"DRY RUN: Would commit {len(file_changes)} files to branch '{branch}'")
+                return {
+                    "branch": branch,
+                    "files": [change["path"] for change in file_changes],
+                    "message": message,
+                    "commit_sha": "dry_run_sha",
+                    "dry_run": True
+                }
+            
+            # Log the operation
+            log_operation("Commit_And_Push", {
+                "branch": branch,
+                "file_count": len(file_changes),
+                "files": [change["path"] for change in file_changes],
+                "message": message,
+                "repo": self.repo_name
+            })
+            
+            commit_files = []
+            
+            for change in file_changes:
+                file_path = change["path"]
+                content = change["content"]
+                
+                # Try to get existing file content
+                try:
+                    contents = self.repo.get_contents(file_path, ref=branch)
+                    # Update existing file
+                    commit_files.append({
+                        "path": contents.path,
+                        "content": content,
+                        "sha": contents.sha
+                    })
+                    self.logger.info(f"Prepared update for file '{file_path}' on branch '{branch}'")
+                except Exception:
+                    # File doesn't exist, create new file
+                    commit_files.append({
+                        "path": file_path,
+                        "content": content
+                    })
+                    self.logger.info(f"Prepared creation of file '{file_path}' on branch '{branch}'")
+            
+            # Create tree and commit
+            base_tree = self.repo.get_git_tree(branch)
+            tree_elements = []
+            
+            for file_info in commit_files:
+                blob = self.repo.create_git_blob(file_info["content"], "utf-8")
+                tree_elements.append({
+                    "path": file_info["path"],
+                    "mode": "100644",
+                    "type": "blob",
+                    "sha": blob.sha
+                })
+            
+            tree = self.repo.create_git_tree(tree_elements, base_tree)
+            parent = self.repo.get_git_commit(branch)
+            commit = self.repo.create_git_commit(message, tree, [parent])
+            
+            # Update branch reference
+            ref = self.repo.get_git_ref(f"heads/{branch}")
+            ref.edit(sha=commit.sha)
+            
+            self.logger.info(f"Committed {len(file_changes)} files to branch '{branch}'")
             
             return {
                 "branch": branch, 
-                "file": file_path, 
+                "files": [change["path"] for change in file_changes],
                 "message": message,
-                "commit_sha": result["commit"].sha
+                "commit_sha": commit.sha
             }
         except Exception as e:
-            self.logger.error(f"Error committing file: {e}")
+            self.logger.error(f"Error committing files: {e}")
             raise
 
     def open_pull_request(self, title: str, body: str, head: str, base: str = "main"):
@@ -220,3 +301,50 @@ class GitHubTool:
         except Exception as e:
             self.logger.error(f"Error getting repository info: {e}")
             raise
+
+    def create_branch_with_uuid(self, base: str = "main") -> str:
+        """
+        Create a new branch with a UUID-based name for safety.
+        
+        Args:
+            base: Base branch name (default: "main")
+            
+        Returns:
+            The created branch name
+        """
+        branch_uuid = str(uuid.uuid4())[:8]
+        branch_name = f"agent-fix/{branch_uuid}"
+        result = self.create_branch(base, branch_name)
+        return result["branch"]
+
+    def commit_and_push_changes(self, branch: str, file_changes: list[dict], message: str) -> str:
+        """
+        Convenience method for committing and pushing changes.
+        
+        Args:
+            branch: Branch name to commit to
+            file_changes: List of dictionaries with 'path' and 'content' keys
+            message: Commit message
+            
+        Returns:
+            The commit SHA
+        """
+        result = self.commit_and_push(branch, file_changes, message)
+        return result["commit_sha"]
+
+    def create_pull_request(self, repo_owner: str, repo_name: str, branch: str, base: str, title: str, body: str) -> dict:
+        """
+        Create a pull request using the GitHub API.
+        
+        Args:
+            repo_owner: Repository owner
+            repo_name: Repository name
+            branch: Source branch name
+            base: Target branch name
+            title: PR title
+            body: PR description
+            
+        Returns:
+            Dictionary with PR details
+        """
+        return self.open_pull_request(title, body, branch, base)

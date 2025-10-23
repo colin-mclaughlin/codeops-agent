@@ -64,7 +64,8 @@ async def get_agent_runs(
                 "status": run.result.get("status", "unknown"),
                 "latency_ms": latency_ms,
                 "tokens_used": tokens_used,
-                "cost_usd": run.cost_usd or 0.0
+                "cost_usd": run.cost_usd or 0.0,
+                "critic_confidence": run.critic_confidence
             }
             
             # Add run log event type if available
@@ -126,6 +127,7 @@ async def get_agent_run(
             "latency_ms": latency_ms,
             "tokens_used": tokens_used,
             "cost_usd": agent_run.cost_usd or 0.0,
+            "critic_confidence": agent_run.critic_confidence,
             "result": agent_run.result
         }
         
@@ -144,3 +146,89 @@ async def get_agent_run(
     except Exception as e:
         logger.error(f"Error retrieving agent run {run_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve agent run")
+
+
+@router.get("/runs/{run_id}/trace")
+async def get_agent_run_trace(
+    run_id: int,
+    session: AsyncSession = Depends(get_session)
+) -> dict:
+    """
+    Get detailed trace information for a specific agent run.
+    
+    Args:
+        run_id: ID of the agent run
+        session: Database session
+        
+    Returns:
+        Detailed trace information including agent steps and critic verdict
+    """
+    try:
+        stmt = select(AgentRun).where(AgentRun.id == run_id)
+        result = await session.execute(stmt)
+        agent_run = result.scalar_one_or_none()
+        
+        if not agent_run:
+            raise HTTPException(status_code=404, detail="Agent run not found")
+        
+        # Get associated run log if it exists
+        run_log = None
+        if agent_run.run_log_id:
+            stmt_log = select(RunLog).where(RunLog.id == agent_run.run_log_id)
+            result_log = await session.execute(stmt_log)
+            run_log = result_log.scalar_one_or_none()
+        
+        # Extract commit_sha from run_log payload if available
+        commit_sha = None
+        if run_log and run_log.payload:
+            commit_sha = run_log.payload.get("commit_sha")
+        
+        # Create mock agent steps based on the plan and result
+        # In a real implementation, these would be stored during execution
+        agent_steps = [
+            {
+                "tool": "Retrieval",
+                "input": f"Retrieve context for commit {commit_sha or 'latest'}",
+                "output": f"Retrieved {len(agent_run.plan.split())} context snippets",
+                "ts": agent_run.created_at.isoformat() + "Z"
+            },
+            {
+                "tool": "Plan",
+                "input": "Analyze context and create execution plan",
+                "output": agent_run.plan[:200] + "..." if len(agent_run.plan) > 200 else agent_run.plan,
+                "ts": agent_run.created_at.isoformat() + "Z"
+            },
+            {
+                "tool": "Execute",
+                "input": "Execute the planned actions",
+                "output": f"Execution completed with status: {agent_run.result.get('status', 'unknown')}",
+                "ts": agent_run.created_at.isoformat() + "Z"
+            },
+            {
+                "tool": "Test",
+                "input": "Validate execution results",
+                "output": agent_run.result.get("message", "Validation completed"),
+                "ts": agent_run.created_at.isoformat() + "Z"
+            }
+        ]
+        
+        # Create critic information
+        critic = {
+            "summary": f"Agent execution {'successful' if agent_run.result.get('status') == 'ok' else 'failed'}",
+            "confidence": agent_run.critic_confidence or 0.75,  # Default confidence if not set
+            "notes": f"Token usage: {agent_run.token_count or 0}, Cost: ${agent_run.cost_usd or 0.0:.6f}"
+        }
+        
+        trace_data = {
+            "run_id": str(agent_run.id),
+            "agent_steps": agent_steps,
+            "critic": critic
+        }
+        
+        return trace_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving agent run trace {run_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve agent run trace")
